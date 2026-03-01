@@ -1,167 +1,90 @@
-# Smart LLM Router
+# Smart LLM Router (Local CLI)
 
-*Cheapest model that meets quality, with automated evaluation + fallback.*
+**System1/System2 routing with structured logging, judge-based quality checks, and a terminal-first experience.**
 
-A FastAPI-based service that intelligently routes Large Language Model (LLM) requests between fast (cheap) and strong (expensive) models, evaluates response quality, and provides automatic fallback mechanisms.
+This repo keeps the entire routing stack local: prompts flow through the fast (System1) model, the router applies heuristics, the strong (System2) model kicks in when the judge requests higher quality, and every run emits metrics so you can track latency, cost, fallback decisions, and judge scores.
 
-## Features
+## Getting started
 
-- **Intelligent Routing**: Automatically chooses between fast and strong models based on query complexity
-- **Quality Evaluation**: Uses a judge model to assess response quality and trigger fallbacks
-- **Caching**: In-memory TTL caching for repeated queries
-- **Metrics & Monitoring**: Comprehensive logging and Prometheus-compatible metrics
-- **Offline Evaluation**: Test harness for measuring performance against datasets
-- **Local-First**: Uses Ollama for cost-free local LLM inference
+### 1. Create the virtual environment
 
-## Architecture
-
-```
-User Request → FastAPI → Router → LLM Client → Response
-                    ↓         ↓
-               Evaluator ← Judge Model
-                    ↓
-               Metrics Logger → SQLite
-```
-
-### Components
-
-1. **API Gateway (FastAPI)**: Main entry point with REST endpoints
-2. **Router**: Core logic for model selection and fallback handling
-3. **LLM Client**: Handles communication with Ollama models (fast, strong, judge)
-4. **Evaluator**: Quality assessment using judge model
-5. **Cache**: In-memory caching with TTL
-6. **Storage**: SQLite database for metrics persistence
-7. **Metrics**: Aggregation and Prometheus endpoint
-8. **Eval Harness**: Offline testing and benchmarking
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.9+
-- [Ollama](https://ollama.ai/) installed and running
-- Models: `llama2:7b` (fast), `llama2:13b` (strong)
-
-### Installation
-
-```bash
-git clone <repository-url>
-cd smart-llm-router
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Configuration
+### 2. Install Ollama and pull the models
 
-Edit `config/__init__.py` or set environment variables:
+1. Install Ollama by following the instructions at https://ollama.com/docs. After installation, make sure the `ollama` binary is on your `PATH` or set `OLLAMA_BIN_PATH` to the executable path (e.g., `C:\Users\ragha\AppData\Local\Programs\Ollama\ollama.exe`).
+2. Pull the models you want to use:
+   ```powershell
+   ollama pull llama2:7b
+   ollama pull llama2:13b
+   ```
+3. (Optional) For the judge consider pointing to the strong model, unless you have a smaller dedicated judge model.
 
-```bash
-export FAST_MODEL_NAME="llama2:7b"
-export STRONG_MODEL_NAME="llama2:13b"
-export OLLAMA_BASE_URL="http://localhost:11434"
+### 3. Configure the router
+
+Set the environment variables so the router points to your Ollama models:
+
+```powershell
+$env:LLM_BACKEND = "ollama"
+$env:FAST_MODEL_PATH = "llama2:7b"
+$env:STRONG_MODEL_PATH = "llama2:13b"
+$env:JUDGE_MODEL_PATH = "llama2:13b"
+$env:OLLAMA_BIN_PATH = "C:\Users\<you>\AppData\Local\Programs\Ollama\ollama.exe"
 ```
 
-### Running
+If you prefer the `transformers` backend instead of Ollama, install PyTorch and Transformers (`pip install torch transformers`), set `LLM_BACKEND=transformers`, and point the `*_MODEL_PATH` values to local checkpoints (or HF repo IDs).
 
-```bash
-python -m app.main
+## Running the router
+
+### Standard runner (existing behavior)
+
+Use the built-in runner to load `samples/demo_queries.json` or pass your own prompt:
+
+```powershell
+python run_router.py --queries-file samples/demo_queries.json
+python run_router.py --prompt "Explain how routers work"
 ```
 
-The API will be available at `http://localhost:8000`
+Each prompt prints the routing decision, model, judge verdict, fallback status, latency/cost metrics, token counts, and answer. The in-memory metrics logger keeps a running summary that is printed at the end of the session.
 
-## API Usage
+### Structured logging wrapper (new)
 
-### POST /v1/chat
+`python scripts/log_router_session.py` now wraps the router with richer terminal output and JSON logging. It:
 
-```bash
-curl -X POST "http://localhost:8000/v1/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role": "user", "content": "Explain quantum computing"}],
-    "mode": "auto"
-  }'
+- Logs system metadata (platform, Python version, working directory).
+- Prints per-run headers, token breakdown graphs, judge verdicts, and answers.
+- Dumps structured JSON entries to `logs/router_sessions.log` for later sharing.
+- Prints the session metrics summary (total requests, avg latency/cost, fallback rate, judge correctness, error rate).
+
+Run it like this:
+
+```powershell
+python scripts/log_router_session.py --session daily-demo --queries-file samples/demo_queries.json
+python scripts/log_router_session.py --session quick-test --prompt "Summarize the architecture"
 ```
 
-Response:
-```json
-{
-  "answer": "Quantum computing uses quantum mechanics...",
-  "route": "fast",
-  "model_used": "llama2:7b",
-  "fallback_used": false,
-  "judge": {
-    "correctness": 8,
-    "completeness": 7,
-    "format_ok": true,
-    "hallucination_risk": 2,
-    "should_fallback": false,
-    "notes": "Good technical explanation"
-  },
-  "metrics": {
-    "latency_ms": 1250.5,
-    "llm_latency_ms": 980.2,
-    "judge_latency_ms": 180.3,
-    "cache_hit": false,
-    "cost_units": 1.2
-  },
-  "trace_id": "abc-123-def"
-}
-```
+The logs are stored in `logs/router_sessions.log` (created automatically). Share snippets from this log or the terminal output when documenting your results.
 
-### GET /metrics
+## Logging & metrics
 
-Returns Prometheus-formatted metrics for monitoring.
+- Every router result is logged with `route`, `model`, `reason`, `metrics`, `judge`, and `trace_id` (useful for retrospective analysis).
+- Metrics include `latency_ms`, `cost_units`, `prompt_tokens`, `response_tokens`, and fallback flags.
+- The summary at the end of a run shows `total_requests`, `avg_latency_ms`, `avg_cost_units`, `fallback_rate`, `avg_judge_correctness`, and `error_rate`.
 
-### GET /health
+## Samples & diagnostics
 
-Simple health check endpoint.
+- `samples/demo_queries.json` contains a set of prompts that exercise System1/System2 routing, citations, and fallback logic.
+- `scripts/local_demo.py` offers a lighter way to inspect the heuristics without launching a real LLM (useful for dry runs).
+- `docs/project_report.md` explains the terminal-first direction, logging additions, and how to share the project story publicly.
 
-## Evaluation
+## Next steps
 
-Run the evaluation harness:
-
-```bash
-python eval/harness.py --num-samples 20
-```
-
-This will test the router against sample prompts and generate a performance report.
-
-## Development
-
-### Project Structure
-
-```
-├── app/                    # Main application code
-│   ├── main.py            # FastAPI app entry point
-│   ├── router.py          # Routing logic
-│   ├── llm_client.py      # Ollama client
-│   ├── evaluator.py       # Quality evaluation
-│   ├── cache.py           # Caching layer
-│   ├── storage.py         # SQLite storage
-│   └── metrics.py         # Metrics collection
-├── config/                # Configuration
-├── eval/                  # Evaluation system
-│   ├── harness.py         # Test runner
-│   └── eval_set.jsonl     # Test dataset
-├── tests/                 # Unit tests
-├── docs/                  # Documentation
-├── requirements.txt       # Python dependencies
-└── README.md             # This file
-```
-
-### Testing
-
-```bash
-pytest tests/
-```
-
-### Contributing
-
-1. Follow the coding guidelines in `CODING_GUIDELINES.md`
-2. Create feature branches from `develop`
-3. Write tests for new functionality
-4. Ensure evaluation harness passes
-5. Submit PR with comprehensive description
-
-## License
-
-MIT License
+1. Run the logging wrapper and capture `logs/router_sessions.log` for sharing on LinkedIn or in documentation.
+2. Keep your Ollama models updated (`ollama pull <model> --force` when new versions land).
+3. If needed, add tests under `tests/` covering routing decisions, cache hits, and metrics aggregation.
+4. When you make changes, stage them and `git push` to share your updated router logic.
