@@ -1,0 +1,32 @@
+[
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Summarize the Apollo 11 mission and highlight the critical safety checks."
+      }
+    ],
+    "mode": "auto",
+    "needs_citations": false
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Provide a JSON schema for an order payload and explain each field."
+      }
+    ],
+    "mode": "auto",
+    "needs_citations": true
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Debug the following recursive function: def power(x, n): return x * power(x, n - 1)"
+      }
+    ],
+    "mode": "auto",
+    "needs_citations": false
+  }
+]

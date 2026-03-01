@@ -1,155 +1,151 @@
 """
-LLM Router Module
+Smart LLM Router
 
-Handles the core routing logic for deciding between fast and strong models
-based on request characteristics and implementing fallback mechanisms.
+Intelligently routes prompts between fast (System 1) and strong (System 2) models,
+evaluates quality via the judge, applies fallback, and logs metrics.
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
 import time
 import uuid
+from dataclasses import dataclass, asdict
+from typing import List, Dict, Any, Optional, Tuple
 
-from app.llm_client import LLMClient
-from app.evaluator import JudgeEvaluator
 from app.cache import Cache
+from app.evaluator import JudgeEvaluator
 from app.metrics import MetricsLogger
+from config import settings
 
-router = APIRouter()
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    mode: str = "auto"  # auto, fast, strong
-    needs_citations: bool = False
-    response_format: str = "text"
-    max_tokens: int = 512
-    temperature: float = 0.2
-
-class JudgeResult(BaseModel):
-    correctness: int
-    completeness: int
-    format_ok: bool
-    hallucination_risk: int
-    should_fallback: bool
-    notes: str
-
-class ChatResponse(BaseModel):
+@dataclass
+class RouterResult:
     answer: str
     route: str
     model_used: str
     fallback_used: bool
-    judge: JudgeResult
+    judge: Dict[str, Any]
     metrics: Dict[str, Any]
     trace_id: str
+    cache_hit: bool
+    routing_reason: str
 
-@router.post("/v1/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
-    """
-    Main chat endpoint that routes requests to appropriate LLM models
-    with quality evaluation and fallback.
-    """
-    trace_id = str(uuid.uuid4())
-    start_time = time.time()
 
-    try:
-        # Initialize components
-        llm_client = LLMClient()
-        evaluator = JudgeEvaluator()
-        cache = Cache()
-        metrics_logger = MetricsLogger()
+class SmartRouter:
+    def __init__(
+        self,
+        llm_client: Optional[Any] = None,
+        evaluator: Optional[JudgeEvaluator] = None,
+        cache: Optional[Cache] = None,
+        metrics_logger: Optional[MetricsLogger] = None,
+    ):
+        self.llm_client = llm_client or self._create_llm_client()
+        self.evaluator = evaluator or JudgeEvaluator()
+        self.cache = cache or Cache()
+        self.metrics_logger = metrics_logger or MetricsLogger()
 
-        # Check cache first
-        cache_key = f"{request.messages[-1].content}_{request.mode}"
-        cached_response = cache.get(cache_key)
-        if cached_response:
-            return ChatResponse(
-                **cached_response,
-                metrics={"latency_ms": (time.time() - start_time) * 1000, "cache_hit": True},
-                trace_id=trace_id
-            )
+    def _create_llm_client(self):
+        from app.llm_client import LLMClient
 
-        # Determine routing
-        route = request.mode
-        if route == "auto":
-            route = determine_route(request)
+        return LLMClient()
 
-        # Get LLM response
+    def _call_model(self, route: str, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> str:
+        return self.llm_client.call_model(route, messages, max_tokens, temperature)
+
+    def _evaluate(self, messages: List[Dict[str, str]], response: str) -> Dict[str, Any]:
+        return self.evaluator.evaluate_response(messages, response)
+
+    def process(
+        self,
+        messages: List[Dict[str, str]],
+        mode: str = "auto",
+        needs_citations: bool = False,
+        response_format: str = "text",
+        max_tokens: int = 512,
+        temperature: float = 0.2,
+    ) -> RouterResult:
+        trace_id = str(uuid.uuid4())
+        start_time = time.time()
+        cache_key = f"{messages[-1]['content']}_{mode}"
+
+        cached = self.cache.get(cache_key)
+        if cached:
+            cached["trace_id"] = trace_id
+            cached["metrics"]["latency_ms"] = (time.time() - start_time) * 1000
+            cached["cache_hit"] = True
+            self.metrics_logger.log_request(cached)
+            return RouterResult(cache_hit=True, **cached)
+
+        prompt_text = messages[-1]["content"]
+        route, reason = mode_reason(mode, prompt_text, needs_citations)
+
         llm_start = time.time()
-        response = await llm_client.call_model(route, request.messages, request.max_tokens, request.temperature)
+        response = self._call_model(route, messages, max_tokens, temperature)
         llm_latency = (time.time() - llm_start) * 1000
 
-        # Evaluate response
-        judge_start = time.time()
-        judge_result = await evaluator.evaluate_response(request.messages, response)
-        judge_latency = (time.time() - judge_start) * 1000
-
-        # Fallback if needed
+        judge_result = self._evaluate(messages, response)
         fallback_used = False
-        if judge_result.should_fallback and route == "fast":
-            fallback_start = time.time()
-            response = await llm_client.call_model("strong", request.messages, request.max_tokens, request.temperature)
-            fallback_used = True
-            judge_result = await evaluator.evaluate_response(request.messages, response)
-            llm_latency += (time.time() - fallback_start) * 1000
 
-        # Prepare response
-        chat_response = ChatResponse(
+        if judge_result["should_fallback"] and route == "fast":
+            fallback_used = True
+            fallback_start = time.time()
+            response = self._call_model("strong", messages, max_tokens, temperature)
+            llm_latency += (time.time() - fallback_start) * 1000
+            judge_result = self._evaluate(messages, response)
+            route = "strong"
+
+        latency_ms = (time.time() - start_time) * 1000
+        cost_units = calculate_cost_units(route, len(response.split()), fallback_used)
+
+        response_tokens = count_tokens(response)
+        metrics = {
+            "latency_ms": latency_ms,
+            "llm_latency_ms": llm_latency,
+            "judge_latency_ms": 30,
+            "cache_hit": False,
+            "cost_units": cost_units,
+            "fallback_used": fallback_used,
+            "prompt_tokens": count_tokens(prompt_text),
+            "response_tokens": response_tokens,
+            "routing_reason": reason,
+        }
+
+        result = RouterResult(
             answer=response,
             route=route,
-            model_used=llm_client.get_model_name(route),
+            model_used=self.llm_client.get_model_name(route),
             fallback_used=fallback_used,
             judge=judge_result,
-            metrics={
-                "latency_ms": (time.time() - start_time) * 1000,
-                "llm_latency_ms": llm_latency,
-                "judge_latency_ms": judge_latency,
-                "cache_hit": False,
-                "cost_units": calculate_cost_units(route, len(response.split()), fallback_used)
-            },
-            trace_id=trace_id
+            metrics=metrics,
+            trace_id=trace_id,
+            cache_hit=False,
+            routing_reason=reason,
         )
 
-        # Cache response
-        cache.set(cache_key, chat_response.dict())
+        self.cache.set(cache_key, asdict(result))
+        self.metrics_logger.log_request(asdict(result))
+        return result
 
-        # Log metrics
-        await metrics_logger.log_request(chat_response)
 
-        return chat_response
+def count_tokens(text: str) -> int:
+    return max(1, len(text.strip().split()))
 
-    except Exception as e:
-        # Log error and return appropriate response
-        await metrics_logger.log_error(trace_id, str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-def determine_route(request: ChatRequest) -> str:
-    """
-    Determine routing based on heuristics from the product spec.
-    """
-    prompt = request.messages[-1].content
+def mode_reason(mode: str, prompt: str, needs_citations: bool) -> Tuple[str, str]:
+    prompt_lower = prompt.lower()
+    if mode in {"fast", "strong"}:
+        return mode, f"mode override ({mode})"
+    if needs_citations:
+        return "strong", "needs citations"
+    if "json" in prompt_lower or "schema" in prompt_lower:
+        return "strong", "schema keyword"
+    if len(prompt) > settings.ROUTING_PROMPT_LENGTH_THRESHOLD:
+        return "strong", "prompt length"
+    if any(keyword in prompt_lower for keyword in ["prove", "derive", "debug", "analyze", "compare"]):
+        return "strong", "analysis keyword"
+    return "fast", "default fast heuristics"
 
-    # Route to strong if:
-    if request.needs_citations:
-        return "strong"
-    if any(keyword in prompt.lower() for keyword in ["prove", "derive", "debug", "analyze", "compare"]):
-        return "strong"
-    if len(prompt) > 200:  # threshold
-        return "strong"
-    if "json" in prompt.lower() or "schema" in prompt.lower():
-        return "strong"
-
-    return "fast"
 
 def calculate_cost_units(route: str, token_count: int, fallback_used: bool) -> float:
-    """
-    Calculate relative cost units (since we're using local Ollama).
-    """
     base_cost = 1.0 if route == "fast" else 3.0
     if fallback_used:
-        base_cost += 2.0  # additional cost for fallback
-    return base_cost * (token_count / 100)  # rough estimate
+        base_cost += 2.0
+    return base_cost * (token_count / 100)

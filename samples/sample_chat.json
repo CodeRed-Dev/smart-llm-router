@@ -1,0 +1,13 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize the Apollo 11 mission and highlight the critical safety checks."
+    }
+  ],
+  "mode": "auto",
+  "needs_citations": false,
+  "response_format": "text",
+  "max_tokens": 256,
+  "temperature": 0.2
+}

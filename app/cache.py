@@ -8,7 +8,7 @@ and reduce costs for repeated queries.
 import time
 from typing import Any, Optional
 from threading import Lock
-from app.config import settings
+from config import settings
 
 class Cache:
     def __init__(self):

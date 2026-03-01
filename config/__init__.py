@@ -1,33 +1,21 @@
 """
-Configuration Module
-
-Centralized configuration management using Pydantic settings.
+Configuration module with simple environment-backed settings.
 """
 
 import os
-from pydantic import BaseSettings
+from typing import Literal
 
-class Settings(BaseSettings):
-    # LLM Configuration
-    FAST_MODEL_NAME: str = "llama2:7b"  # Small, fast model
-    STRONG_MODEL_NAME: str = "llama2:13b"  # Larger, more capable model
-    JUDGE_MODEL_NAME: str = "llama2:7b"  # Model for evaluation
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    LLM_TIMEOUT_SECONDS: int = 30
-    MAX_RETRIES: int = 3
 
-    # Cache Configuration
-    CACHE_TTL_SECONDS: int = 3600  # 1 hour
+class Settings:
+    FAST_MODEL_PATH: str = os.getenv("FAST_MODEL_PATH", "llama2:7b")
+    STRONG_MODEL_PATH: str = os.getenv("STRONG_MODEL_PATH", "llama2:13b")
+    JUDGE_MODEL_PATH: str = os.getenv("JUDGE_MODEL_PATH", STRONG_MODEL_PATH)
+    MODEL_DEVICE: Literal["auto", "cpu", "cuda"] = os.getenv("MODEL_DEVICE", "auto")
+    CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "3600"))
+    ROUTING_PROMPT_LENGTH_THRESHOLD: int = int(os.getenv("ROUTING_PROMPT_LENGTH_THRESHOLD", "200"))
+    JUDGE_CORRECTNESS_THRESHOLD: int = int(os.getenv("JUDGE_CORRECTNESS_THRESHOLD", "5"))
+    LLM_BACKEND: Literal["transformers", "ollama"] = os.getenv("LLM_BACKEND", "ollama").lower()
+    OLLAMA_BIN_PATH: str = os.getenv("OLLAMA_BIN_PATH", "ollama")
 
-    # Database Configuration
-    DATABASE_PATH: str = "metrics.db"
-
-    # Routing Thresholds
-    ROUTING_PROMPT_LENGTH_THRESHOLD: int = 200
-    JUDGE_CORRECTNESS_THRESHOLD: int = 5
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
 settings = Settings()
