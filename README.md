@@ -39,6 +39,8 @@ $env:OLLAMA_BIN_PATH = "C:\Users\<you>\AppData\Local\Programs\Ollama\ollama.exe"
 
 If you prefer the `transformers` backend instead of Ollama, install PyTorch and Transformers (`pip install torch transformers`), set `LLM_BACKEND=transformers`, and point the `*_MODEL_PATH` values to local checkpoints (or HF repo IDs).
 
+*Tip: copy `.env.example` to `.env` and populate the same variables so `python-dotenv` loads them automatically each session (the repo already loads `.env` before applying defaults).*
+
 ## Running the router
 
 ### Standard runner (existing behavior)
@@ -81,6 +83,12 @@ The logs are stored in `logs/router_sessions.log` (created automatically). Share
 - `samples/demo_queries.json` contains a set of prompts that exercise System1/System2 routing, citations, and fallback logic.
 - `scripts/local_demo.py` offers a lighter way to inspect the heuristics without launching a real LLM (useful for dry runs).
 - `docs/project_report.md` explains the terminal-first direction, logging additions, and how to share the project story publicly.
+
+## Interactive dashboard
+
+- The Flask-based dashboard (run via `python ui/dashboard.py`) lets you fire prompts from a browser while showing route/model decisions, judge analysis, tokens, and full answers in one place.
+- It pulls from the same `SmartRouter` instance as the CLI and keeps a short history so you can compare responses and judge notes without repeating commands.
+- Use the same `.env`/Ollama settings before launching the UI.
 
 ## Next steps
 

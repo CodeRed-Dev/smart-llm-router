@@ -1,9 +1,15 @@
-"""
-Configuration module with simple environment-backed settings.
-"""
+"""Configuration module with simple environment-backed settings."""
+
+from __future__ import annotations
 
 import os
 from typing import Literal
+
+from dotenv import load_dotenv
+
+
+# Load project `.env` first so defaults can be read automatically.
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 
 class Settings:
@@ -16,6 +22,7 @@ class Settings:
     JUDGE_CORRECTNESS_THRESHOLD: int = int(os.getenv("JUDGE_CORRECTNESS_THRESHOLD", "5"))
     LLM_BACKEND: Literal["transformers", "ollama"] = os.getenv("LLM_BACKEND", "ollama").lower()
     OLLAMA_BIN_PATH: str = os.getenv("OLLAMA_BIN_PATH", "ollama")
+    MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", "1024"))
 
 
 settings = Settings()

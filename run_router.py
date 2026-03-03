@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from app.router import SmartRouter, RouterResult
+from config import settings
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -89,7 +90,7 @@ def run_router(queries: List[Dict[str, Any]]):
             mode=query.get("mode", "auto"),
             needs_citations=query.get("needs_citations", False),
             response_format=query.get("response_format", "text"),
-            max_tokens=query.get("max_tokens", 512),
+            max_tokens=query.get("max_tokens", settings.MAX_TOKENS),
             temperature=query.get("temperature", 0.2),
         )
 
@@ -135,7 +136,7 @@ def main():
                 "mode": "auto",
                 "needs_citations": args.needs_citations,
                 "response_format": "text",
-                "max_tokens": 512,
+                "max_tokens": settings.MAX_TOKENS,
                 "temperature": 0.2,
             }
         ]

@@ -5,6 +5,7 @@ Intelligently routes prompts between fast (System 1) and strong (System 2) model
 evaluates quality via the judge, applies fallback, and logs metrics.
 """
 
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, asdict
@@ -59,7 +60,7 @@ class SmartRouter:
         mode: str = "auto",
         needs_citations: bool = False,
         response_format: str = "text",
-        max_tokens: int = 512,
+        max_tokens: int = settings.MAX_TOKENS,
         temperature: float = 0.2,
     ) -> RouterResult:
         trace_id = str(uuid.uuid4())
@@ -107,6 +108,7 @@ class SmartRouter:
             "response_tokens": response_tokens,
             "routing_reason": reason,
         }
+        metrics.update(sample_resources())
 
         result = RouterResult(
             answer=response,
@@ -149,3 +151,46 @@ def calculate_cost_units(route: str, token_count: int, fallback_used: bool) -> f
     if fallback_used:
         base_cost += 2.0
     return base_cost * (token_count / 100)
+
+
+def sample_resources() -> Dict[str, Any]:
+    """
+    Best-effort capture of process/system resource usage.
+    Returns only fields that were successfully measured.
+    """
+    measurements: Dict[str, Any] = {}
+
+    # CPU and RAM (process + system)
+    try:
+        import psutil  # lightweight dependency, declared in requirements
+
+        proc = psutil.Process()
+        with proc.oneshot():
+            # cpu_percent needs a prior call to give meaningful data; using interval=0 for immediate sample.
+            measurements["proc_cpu_percent"] = proc.cpu_percent(interval=0)
+            measurements["proc_rss_mb"] = round(proc.memory_info().rss / (1024 * 1024), 2)
+        vm = psutil.virtual_memory()
+        measurements["system_mem_percent"] = vm.percent
+    except Exception:
+        # Swallow errors so routing never fails on telemetry
+        pass
+
+    # GPU (NVIDIA only, via nvidia-smi)
+    try:
+        output = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            timeout=1,
+        )
+        line = output.strip().splitlines()[0]
+        util_str, mem_str = [part.strip() for part in line.split(",")]
+        measurements["gpu_util_percent"] = float(util_str)
+        measurements["gpu_mem_mb"] = float(mem_str)
+    except Exception:
+        pass
+
+    return measurements

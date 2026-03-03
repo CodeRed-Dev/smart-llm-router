@@ -12,7 +12,7 @@ import logging
 import shutil
 import subprocess
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from config import settings
 
@@ -125,31 +125,46 @@ class _OllamaLLMClient:
         if not shutil.which(self._binary):
             raise FileNotFoundError(f"Ollama binary not found at '{self._binary}'")
 
+    def _extract_from_payload(self, payload: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("message", "response", "text", "output"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        if isinstance(payload.get("choices"), list):
+            for choice in payload["choices"]:
+                if isinstance(choice, dict):
+                    content = choice.get("message") or {}
+                    text = content.get("text") or content.get("content")
+                    if isinstance(text, str):
+                        return text
+                    content_text = choice.get("text")
+                    if isinstance(content_text, str):
+                        return content_text
+        return None
+
     def _extract_message(self, raw: str) -> str:
-        for line in raw.splitlines():
-            clean = line.strip()
-            if not clean or clean.startswith(""):
-                continue
-            try:
-                payload = json.loads(clean)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                for key in ("message", "response", "text", "output"):
-                    value = payload.get(key)
-                    if isinstance(value, str):
-                        return value
-                if isinstance(payload.get("choices"), list):
-                    for choice in payload["choices"]:
-                        if isinstance(choice, dict):
-                            content = choice.get("message") or {}
-                            text = content.get("text") or content.get("content")
-                            if isinstance(text, str):
-                                return text
+        cleaned_lines = []
         for line in raw.splitlines():
             clean = line.strip()
             if clean and not clean.startswith(""):
-                return clean
+                cleaned_lines.append(clean)
+
+        parsed_payloads = []
+        for clean in cleaned_lines:
+            try:
+                parsed_payloads.append(json.loads(clean))
+            except json.JSONDecodeError:
+                continue
+
+        for payload in parsed_payloads:
+            result = self._extract_from_payload(payload)
+            if isinstance(result, str):
+                return result
+
+        if cleaned_lines:
+            return "\n".join(cleaned_lines)
         return "<no response>"
 
     def _run_model(self, route: str, prompt: str) -> str:
