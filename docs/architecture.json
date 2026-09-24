@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {"title": "Smart LLM Router — Local Routing Architecture", "quality_profile": "showcase", "viewBox": [1300, 620]},
+  "components": [
+    {"id":"operator","type":"external","label":"Operator","sublabel":"CLI or Flask dashboard","pos":[35,270],"size":[155,70]},
+    {"id":"entry","type":"frontend","label":"Run interface","sublabel":"run_router.py / ui/dashboard.py","pos":[230,270],"size":[175,70]},
+    {"id":"router","type":"backend","label":"SmartRouter","sublabel":"Routing + fallback","pos":[455,270],"size":[175,70]},
+    {"id":"fast","type":"external","label":"System 1 model","sublabel":"Fast local LLM","pos":[680,270],"size":[155,70]},
+    {"id":"judge","type":"backend","label":"Quality judge","sublabel":"Verdict + fallback","pos":[885,270],"size":[175,70]},
+    {"id":"metrics","type":"database","label":"Session logs + metrics","sublabel":"Traces + quality metrics","pos":[1100,270],"size":[165,70]},
+    {"id":"strong","type":"external","label":"System 2 model","sublabel":"Strong local LLM on escalation","pos":[895,465],"size":[165,65]}
+  ],
+  "connections": [
+    {"from":"operator","to":"entry","variant":"emphasis"},
+    {"from":"entry","to":"router"},
+    {"from":"router","to":"fast"},
+    {"from":"fast","to":"judge"},
+    {"from":"judge","to":"metrics","variant":"emphasis"},
+    {"from":"judge","to":"strong","fromSide":"bottom","toSide":"top"}
+  ],
+  "cards": [
+    {"dot":"cyan","title":"Decision path","items":["Fast model handles the default route","Judge can request System 2 escalation"]},
+    {"dot":"emerald","title":"Local execution","items":["Ollama or Transformers backends are configured locally","CLI and dashboard share the routing stack"]},
+    {"dot":"violet","title":"Observability","items":["Every result includes routing and judge metadata","Session logs preserve latency, cost and fallback evidence"]}
+  ]
+}
