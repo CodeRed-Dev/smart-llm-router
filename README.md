@@ -96,3 +96,26 @@ The logs are stored in `logs/router_sessions.log` (created automatically). Share
 2. Keep your Ollama models updated (`ollama pull <model> --force` when new versions land).
 3. If needed, add tests under `tests/` covering routing decisions, cache hits, and metrics aggregation.
 4. When you make changes, stage them and `git push` to share your updated router logic.
+
+## Evidence report
+
+The complete project storyline, experiment results, architecture diagram, reproduction commands, and limitations are published in the shared RProjects site:
+
+- **Live report:** https://raghav-projects.raghav-codes.chatgpt.site/smart-llm-router
+- **Interactive architecture:** https://raghav-projects.raghav-codes.chatgpt.site/smart-llm-router-architecture.html
+
+### Recorded results
+
+- The deterministic `python scripts/local_demo.py` completed **3/3** requests, finished all three on the strong route, and exercised **1/3 (33.33%)** fallback with **196.67 ms** mean latency and **0.44** mean cost units.
+- The captured local Ollama report recorded a System 1 `llama2:7b` run at approximately **64.5 s / 228 output tokens / 2.24 cost units**, and a System 2 `llama2:13b` run at approximately **60.3 s / 70 output tokens / 1.23 cost units**.
+- Those Ollama numbers are machine- and configuration-bound observations, not portable benchmarks. The report preserves the GPU pressure, missing-URL issue, and conflicting judge-score notes rather than presenting them as settled quality claims.
+
+### Reproduce and interpret
+
+```powershell
+python scripts/local_demo.py
+python run_router.py --queries-file samples/demo_queries.json
+python scripts/log_router_session.py --session daily-demo --queries-file samples/demo_queries.json
+```
+
+The project currently demonstrates observable routing, judge-triggered fallback, metrics, session logging, and a Flask dashboard. It does **not** yet claim production reliability, general model-quality improvement, portable latency/cost benchmarks, or automated regression coverage.
